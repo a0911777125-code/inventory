@@ -313,7 +313,6 @@ tr:hover td{background:rgba(124,63,224,.04);}
     <div class="ch"><span class="ct">新增訂單</span></div>
     <div class="fr">
       <div class="fg"><label>客戶名稱</label><input id="o-cust"/></div>
-      <div class="fg"><label>聯絡方式</label><input id="o-contact"/></div>
       <div class="fg"><label>訂單日期</label><input id="o-date" type="date"/></div>
     </div>
     <div style="margin-bottom:9px">
@@ -324,6 +323,15 @@ tr:hover td{background:rgba(124,63,224,.04);}
         <button class="btn bs bp" onclick="addOItem()">加入</button>
       </div>
       <div id="o-items"></div>
+    </div>
+    <div style="margin:4px 0 6px;font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;border-top:1px dashed var(--bd);padding-top:10px">📦 收件資料（貨到付款）</div>
+    <div class="fr">
+      <div class="fg"><label>收件電話</label><input id="o-rphone" placeholder="0912-345-678"/></div>
+      <div class="fg"><label>收件姓名</label><input id="o-rname" placeholder="留空 = 同客戶名"/></div>
+    </div>
+    <div class="fr">
+      <div class="fg"><label>超商</label><select id="o-rstore"><option value="">-- 選擇 --</option><option value="全家">全家</option><option value="7-11">7-11</option></select></div>
+      <div class="fg"><label>門市名稱</label><input id="o-rbranch" placeholder="例：台中文心門市"/></div>
     </div>
     <div class="fr"><div class="fg"><label>備註</label><input id="o-note"/></div></div>
     <button class="btn bp" onclick="submitOrder()">建立訂單</button>
@@ -596,12 +604,20 @@ tr:hover td{background:rgba(124,63,224,.04);}
     </div>
     <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin-bottom:9px">
       <div class="fg"><label>客戶</label><input id="oe-cust"/></div>
-      <div class="fg"><label>聯絡</label><input id="oe-contact"/></div>
       <div class="fg"><label>日期</label><input id="oe-date" type="date"/></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:9px">
       <div class="fg"><label>狀態</label><select id="oe-status"><option>新訂單</option><option>已出貨</option><option>已完成</option><option>已取消</option></select></div>
       <div class="fg"><label>備註</label><input id="oe-note"/></div>
+    </div>
+    <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;border-top:1px dashed var(--bd);padding:8px 0 6px">📦 收件資料</div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:9px">
+      <div class="fg"><label>收件姓名</label><input id="oe-rname"/></div>
+      <div class="fg"><label>收件電話</label><input id="oe-rphone"/></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:9px">
+      <div class="fg"><label>超商</label><select id="oe-rstore"><option value="">-- 選擇 --</option><option value="全家">全家</option><option value="7-11">7-11</option></select></div>
+      <div class="fg"><label>門市名稱</label><input id="oe-rbranch"/></div>
     </div>
     <div id="oe-items" style="background:var(--bg2);border:1px solid var(--bd);border-radius:var(--r);padding:10px 12px;margin-bottom:14px;font-size:12px;color:var(--t2)"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--bd);padding-top:14px">
@@ -1049,9 +1065,11 @@ function remOItem(i){tmpOItems.splice(i,1);renderTmpItems();}
 function submitOrder(){
   const cust=document.getElementById('o-cust').value.trim();if(!cust)return alert('請輸入客戶名稱');if(!tmpOItems.length)return alert('請加入品項');
   const total=tmpOItems.reduce((s,i)=>s+i.qty*i.price,0),tp=tmpOItems.reduce((s,i)=>s+(i.price-i.cost)*i.qty,0);
-  db.orders.unshift({id:uid(),seq:'ORD-'+String(db.orderSeq++).padStart(4,'0'),date:document.getElementById('o-date').value||today(),customer:cust,contact:document.getElementById('o-contact').value,items:[...tmpOItems],total,totalProfit:tp,note:document.getElementById('o-note').value,status:'新訂單'});
+  db.orders.unshift({id:uid(),seq:'ORD-'+String(db.orderSeq++).padStart(4,'0'),date:document.getElementById('o-date').value||today(),customer:cust,items:[...tmpOItems],total,totalProfit:tp,note:document.getElementById('o-note').value,status:'新訂單',rname:document.getElementById('o-rname').value.trim(),rphone:document.getElementById('o-rphone').value.trim(),rstore:document.getElementById('o-rstore').value,rbranch:document.getElementById('o-rbranch').value.trim()});
+  syncCustomerFromOrder(db.orders[0]);
   save();tmpOItems=[];renderTmpItems();popPS('o-prod');buildMonthOpts('o-month',db.orders);renderOrders();
-  ['o-cust','o-contact','o-note'].forEach(id=>document.getElementById(id).value='');
+  ['o-cust','o-note','o-rname','o-rphone','o-rbranch'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('o-rstore').value='';
 }
 function updOS(id,status){const o=db.orders.find(x=>x.id==id);if(o){o.status=status;save();renderOrders();}}
 function archiveOrder(id){
@@ -1061,8 +1079,10 @@ function archiveOrder(id){
 }
 function openOEditModal(id){
   const o=db.orders.find(x=>x.id==id);if(!o)return;editingOId=id;
-  document.getElementById('oe-cust').value=o.customer||'';document.getElementById('oe-contact').value=o.contact||'';
+  document.getElementById('oe-cust').value=o.customer||'';
   document.getElementById('oe-date').value=o.date||today();document.getElementById('oe-status').value=o.status||'新訂單';document.getElementById('oe-note').value=o.note||'';
+  document.getElementById('oe-rname').value=o.rname||'';document.getElementById('oe-rphone').value=o.rphone||'';
+  document.getElementById('oe-rstore').value=o.rstore||'';document.getElementById('oe-rbranch').value=o.rbranch||'';
   renderOEItems();openModal('m-o-edit');
 }
 function renderOEItems(){
@@ -1121,10 +1141,13 @@ function oeAddItem(){
 function saveOEdit(){
   const o=db.orders.find(x=>x.id==editingOId);if(!o)return;
   o.customer=document.getElementById('oe-cust').value.trim()||o.customer;
-  o.contact=document.getElementById('oe-contact').value;
   o.date=document.getElementById('oe-date').value||o.date;
   o.status=document.getElementById('oe-status').value;
   o.note=document.getElementById('oe-note').value;
+  o.rname=document.getElementById('oe-rname').value.trim();
+  o.rphone=document.getElementById('oe-rphone').value.trim();
+  o.rstore=document.getElementById('oe-rstore').value;
+  o.rbranch=document.getElementById('oe-rbranch').value.trim();
   // 儲存品項數量和售價
   o.items.forEach((item,i)=>{
     const newQty=parseInt(document.getElementById(`oe-qty-${i}`)?.value)||item.qty;
@@ -1133,6 +1156,7 @@ function saveOEdit(){
   });
   o.total=o.items.reduce((s,i)=>s+i.qty*i.price,0);
   o.totalProfit=o.items.reduce((s,i)=>s+(i.price-(i.cost||0))*i.qty,0);
+  syncCustomerFromOrder(o);
   save();closeModal('m-o-edit');renderOrders();
 }
 function openPartialModal(oid){
@@ -1178,35 +1202,42 @@ function renderPendingShip(){
   const el=document.getElementById('pending-ship-list');
   const sumEl=document.getElementById('pending-ship-sum');
   if(!el)return;
-  // 收集所有未取消、未完成訂單的待出品項
-  const pending={};
-  db.orders.filter(o=>!o.archived&&o.status!=='已取消'&&o.status!=='已完成').forEach(o=>{
-    o.items.forEach(i=>{
-      const remaining=i.qty-(i.shippedQty||0);
-      if(remaining<=0)return;
-      const key=i.name+(i.skuLabel?'|'+i.skuLabel:'');
-      if(!pending[key])pending[key]={name:i.name,sku:i.skuLabel||'',qty:0,orders:[]};
-      pending[key].qty+=remaining;
-      pending[key].orders.push(o.seq);
-    });
-  });
-  const items=Object.values(pending).sort((a,b)=>b.qty-a.qty);
-  if(!items.length){
+  const pendingOrders=db.orders.filter(o=>!o.archived&&o.status!=='已取消'&&o.status!=='已完成'&&o.items.some(i=>(i.qty-(i.shippedQty||0))>0));
+  if(!pendingOrders.length){
     el.innerHTML='<div style="color:var(--t3);font-size:13px;padding:8px 0">目前無待出貨訂單 ✓</div>';
-    if(sumEl)sumEl.textContent='';
-    return;
+    if(sumEl)sumEl.textContent='';return;
   }
-  el.innerHTML=items.map(x=>`
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--bd)">
-      <div>
-        <span style="font-weight:500">${x.name}</span>
-        ${x.sku?`<span style="font-size:11px;color:var(--t2);margin-left:6px">· ${x.sku}</span>`:''}
-        <div style="font-size:10px;color:var(--t3);margin-top:2px">訂單：${x.orders.slice(0,3).join('、')}${x.orders.length>3?'...等':''}（共 ${x.orders.length} 筆）</div>
+  el.innerHTML=pendingOrders.map(o=>{
+    const pendingItems=o.items.filter(i=>(i.qty-(i.shippedQty||0))>0);
+    const rname=o.rname||o.customer;
+    const rphone=o.rphone||o.contact||'';
+    const store=o.rstore&&o.rbranch?`${o.rstore} ${o.rbranch}`:(o.rstore||o.rbranch||'');
+    const storeColor=o.rstore==='全家'?'var(--bl)':o.rstore==='7-11'?'var(--gn)':'var(--t3)';
+    const hasShip=!!(rname||rphone||store);
+    return`<div style="padding:10px 0;border-bottom:1px solid var(--bd)">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap">
+        <div style="flex:1;min-width:160px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+            <span style="font-size:10px;color:var(--t3)">${o.seq}</span>
+            <span style="font-weight:600;font-size:13px">${o.customer}</span>
+            <span class="badge bgnew" style="font-size:9px">${o.status}</span>
+          </div>
+          <div style="font-size:11px;color:var(--t2);margin-bottom:4px">${pendingItems.map(i=>`${i.name}${i.skuLabel?' · '+i.skuLabel:''} <strong>×${i.qty-(i.shippedQty||0)}</strong>`).join('　')}</div>
+          ${hasShip?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:5px;padding:6px 9px;background:rgba(201,150,10,.05);border:1px solid rgba(201,150,10,.2);border-radius:8px">
+            <span style="font-size:11px;font-weight:600">📬 ${rname}</span>
+            ${rphone?`<span style="font-size:11px;color:var(--t2)">${rphone}</span>`:''}
+            ${store?`<span style="font-size:11px;font-weight:600;color:${storeColor}">${store}</span>`:''}
+          </div>`:'<div style="font-size:10px;color:var(--rd);margin-top:4px">⚠️ 尚未填收件資料</div>'}
+        </div>
+        <div style="text-align:right;white-space:nowrap">
+          <div style="font-weight:700;font-size:15px;color:var(--or)">${fmt(o.total)}</div>
+          <div style="font-size:10px;color:var(--t3)">貨到付款</div>
+        </div>
       </div>
-      <span style="font-weight:700;font-size:16px;color:var(--or);white-space:nowrap;margin-left:12px">×${x.qty}</span>
-    </div>`).join('');
-  const totalItems=items.length,totalQty=items.reduce((s,x)=>s+x.qty,0);
-  if(sumEl)sumEl.textContent=`共 ${totalItems} 種商品，待出 ${totalQty} 件`;
+    </div>`;
+  }).join('');
+  const totalQty=pendingOrders.reduce((s,o)=>s+o.items.reduce((ss,i)=>ss+(i.qty-(i.shippedQty||0)),0),0);
+  if(sumEl)sumEl.textContent=`共 ${pendingOrders.length} 筆，待出 ${totalQty} 件`;
 }
 
 function renderOrders(){
@@ -1409,6 +1440,7 @@ function confirmImport(){
     const extraNote=noteEl?noteEl.value.trim():'';
     const finalNote=[extraNote,o.source?'【'+o.source+'】':''].filter(Boolean).join(' ');
     db.orders.unshift({id:uid(),seq:o.seq,date:o.date,customer:o.customer,contact:o.contact,items,total,totalProfit:profit,note:finalNote,status:o.status,source:o.source});
+    syncCustomerFromOrder(db.orders[0]);
     imported++;
   });
   save();cancelImport();buildMonthOpts('o-month',db.orders);renderOrders();
@@ -1416,6 +1448,23 @@ function confirmImport(){
 }
 
 // ─── CUSTOMERS ───
+function syncCustomerFromOrder(o){
+  if(!o.customer)return;
+  if(!db.customers)db.customers=[];
+  const existing=db.customers.find(c=>c.name===o.customer);
+  const phone=o.rphone||o.contact||'';
+  const store=o.rstore||'';
+  const branch=o.rbranch||'';
+  if(!existing){
+    // 新顧客：自動建立
+    db.customers.push({id:uid(),name:o.customer,phone,store,branch,bday:'',note:'',createdAt:today(),autoAdded:true});
+  } else {
+    // 已有：補齊空白欄位（不覆蓋已有資料）
+    if(!existing.phone&&phone)existing.phone=phone;
+    if(!existing.store&&store)existing.store=store;
+    if(!existing.branch&&branch)existing.branch=branch;
+  }
+}
 function addCustomer(){
   const name=document.getElementById('cu-name').value.trim(),phone=document.getElementById('cu-phone').value.trim();
   if(!name)return alert('請輸入姓名');if(!phone)return alert('請輸入電話');
@@ -1429,7 +1478,7 @@ function renderCustomers(){
   const search=(document.getElementById('cu-search')||{}).value?.toLowerCase()||'';
   const storeF=(document.getElementById('cu-store-filter')||{}).value||'';
   const rows=(db.customers||[]).filter(c=>(!search||(c.name.toLowerCase().includes(search)||c.phone.includes(search)))&&(!storeF||c.store===storeF));
-  document.getElementById('customer-table').innerHTML=rows.length?rows.map(c=>{const st=getCuStats(c.name);return`<tr><td style="font-weight:500">${c.name}</td><td><a href="tel:${c.phone}" style="color:var(--ac);text-decoration:none">${c.phone}</a></td><td><span class="ct2">${c.store||'—'}</span></td><td style="color:var(--t2)">${c.bday||'—'}</td><td style="text-align:center">${st.count>0?`<span style="color:var(--ac);font-weight:600">${st.count}</span>`:'—'}</td><td style="font-weight:600;color:${st.total>0?'var(--gn)':'var(--t3)'}">${st.total>0?fmt(st.total):'—'}</td><td style="color:var(--t2);font-size:11px">${c.note||'—'}</td><td><button class="btn bd2 bs" onclick="deleteCustomer('${c.id}')">刪除</button></td></tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:24px">尚無顧客</td></tr>';
+  document.getElementById('customer-table').innerHTML=rows.length?rows.map(c=>{const st=getCuStats(c.name);return`<tr><td style="font-weight:500">${c.name}${c.autoAdded?`<span style="margin-left:5px;font-size:9px;padding:1px 5px;border-radius:8px;background:rgba(26,106,191,.1);color:var(--bl)">自動</span>`:''}${c.branch?`<div style="font-size:10px;color:var(--t3)">${c.store?c.store+' ':''}</div>`:''}</td><td><a href="tel:${c.phone}" style="color:var(--ac);text-decoration:none">${c.phone||'—'}</a></td><td><span class="ct2">${c.store||'—'}${c.branch?' · '+c.branch:''}</span></td><td style="color:var(--t2)">${c.bday||'—'}</td><td style="text-align:center">${st.count>0?`<span style="color:var(--ac);font-weight:600">${st.count}</span>`:'—'}</td><td style="font-weight:600;color:${st.total>0?'var(--gn)':'var(--t3)'}">${st.total>0?fmt(st.total):'—'}</td><td style="color:var(--t2);font-size:11px">${c.note||'—'}</td><td><button class="btn bd2 bs" onclick="deleteCustomer('${c.id}')">刪除</button></td></tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:24px">尚無顧客</td></tr>';
   const el=document.getElementById('cu-count');if(el)el.textContent=`共 ${rows.length} 位`;
 }
 function expCustomers(){
@@ -1534,7 +1583,7 @@ function setCW(ws,w){ws['!cols']=w.map(v=>({wch:v}));}
 function expProducts(){const wb=XLSX.utils.book_new(),rows=[];db.products.filter(p=>!p.archived).forEach(p=>{const cat=catById(p.catId);if(!p.skus||!p.skus.length)rows.push([p.name,cat.name,'—',skuStock(p),p.minStock,p.unit,p.cost||0,p.price||0]);else p.skus.forEach(s=>rows.push([p.name,cat.name,s.name,s.stock,p.minStock,p.unit,s.cost||p.cost||0,s.price||p.price||0]));});const ws=toS(['商品名稱','類別','規格','庫存','安全庫存','單位','成本(元)','售價(元)'],rows);setCW(ws,[16,10,12,8,10,6,10,10]);XLSX.utils.book_append_sheet(wb,ws,'商品列表');XLSX.writeFile(wb,'商品列表.xlsx');}
 function expRS(){const m=document.getElementById('rs-month').value,rows=filterMonth(db.restock.filter(r=>r.status==='received'),m),d=rows.map(r=>[r.receivedDate||r.date,r.product,r.skuLabel||'—',r.qty,r.unitCost,r.totalCost,r.supplier,r.note]);d.push(['','','','','合計',rows.reduce((s,r)=>s+r.totalCost,0),'','']);const ws=toS(['入庫日','商品','規格','數量','單位成本','總成本','供應商','備註'],d);setCW(ws,[12,16,12,8,12,12,14,16]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'入庫紀錄');XLSX.writeFile(wb,`入庫紀錄${m?'_'+m:''}.xlsx`);}
 function expSO(){const m=document.getElementById('so-month').value,rows=filterMonth(db.shipout.filter(s=>!s.archived),m),d=rows.map(s=>[s.date,s.product,s.skuLabel||'—',s.cancelled?'已退單':'有效',s.qty,s.price,s.cost,s.revenue,s.profit,+s.marginRate,s.customer]);const ws=toS(['日期','商品','規格','狀態','數量','售價','成本','收入','利潤','毛利率','客戶'],d);setCW(ws,[12,16,12,8,8,10,10,10,10,10,14]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'出貨紀錄');XLSX.writeFile(wb,`出貨紀錄${m?'_'+m:''}.xlsx`);}
-function expOrders(){const m=document.getElementById('o-month').value,rows=filterMonth(db.orders.filter(o=>!o.archived),m);const ws=toS(['訂單編號','日期','客戶','品項','總金額','利潤','狀態'],rows.map(o=>[o.seq,o.date,o.customer,o.items.map(i=>i.name+(i.skuLabel?' · '+i.skuLabel:'')+'×'+i.qty).join('、'),o.total,o.totalProfit||0,o.status]));setCW(ws,[12,12,14,36,12,10,10]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'訂單列表');XLSX.writeFile(wb,`訂單列表${m?'_'+m:''}.xlsx`);}
+function expOrders(){const m=document.getElementById('o-month').value,rows=filterMonth(db.orders.filter(o=>!o.archived),m);const ws=toS(['訂單編號','日期','客戶','收件姓名','收件電話','超商','門市','品項','總金額','利潤','狀態','備註'],rows.map(o=>[o.seq,o.date,o.customer,o.rname||'',o.rphone||'',o.rstore||'',o.rbranch||'',o.items.map(i=>i.name+(i.skuLabel?' · '+i.skuLabel:'')+'×'+i.qty).join('、'),o.total,o.totalProfit||0,o.status,o.note||'']));setCW(ws,[12,12,14,14,14,8,16,36,12,10,10,20]);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,ws,'訂單列表');XLSX.writeFile(wb,`訂單列表${m?'_'+m:''}.xlsx`);}
 function exportAll(){
   const pv=document.getElementById('fin-period').value||document.getElementById('dash-period').value||'';
   const rs=filterPeriod(db.restock.filter(r=>r.status==='received'),pv,finPT);
