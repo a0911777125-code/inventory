@@ -1223,6 +1223,7 @@ function renderPendingShip(){
             <span class="badge bgnew" style="font-size:9px">${o.status}</span>
           </div>
           <div style="font-size:11px;color:var(--t2);margin-bottom:4px">${pendingItems.map(i=>`${i.name}${i.skuLabel?' · '+i.skuLabel:''} <strong>×${i.qty-(i.shippedQty||0)}</strong>`).join('　')}</div>
+          ${o.note?`<div style="font-size:11px;color:var(--ac);margin-bottom:4px">📝 ${o.note}</div>`:''}
           ${hasShip?`<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:5px;padding:6px 9px;background:rgba(201,150,10,.05);border:1px solid rgba(201,150,10,.2);border-radius:8px">
             <span style="font-size:11px;font-weight:600">📬 ${rname}</span>
             ${rphone?`<span style="font-size:11px;color:var(--t2)">${rphone}</span>`:''}
