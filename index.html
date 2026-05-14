@@ -1474,7 +1474,7 @@ function addCustomer(){
   save();renderCustomers();['cu-name','cu-phone','cu-bday','cu-note'].forEach(id=>document.getElementById(id).value='');
 }
 function deleteCustomer(id){if(!confirm('確定刪除？'))return;db.customers=db.customers.filter(c=>c.id!=id);save();renderCustomers();}
-function getCuStats(name){const orders=db.orders.filter(o=>o.customer===name),sos=db.shipout.filter(s=>s.customer===name&&!s.cancelled);return{count:orders.length+sos.length,total:orders.reduce((s,o)=>s+o.total,0)+sos.reduce((s,r)=>s+r.revenue,0)};}
+function getCuStats(name){const orders=db.orders.filter(o=>o.customer===name&&!o.archived),sos=db.shipout.filter(s=>s.customer===name&&!s.cancelled&&!s.fromOrder);return{count:orders.length+sos.length,total:orders.reduce((s,o)=>s+o.total,0)+sos.reduce((s,r)=>s+r.revenue,0)};}
 function renderCustomers(){
   const search=(document.getElementById('cu-search')||{}).value?.toLowerCase()||'';
   const storeF=(document.getElementById('cu-store-filter')||{}).value||'';
