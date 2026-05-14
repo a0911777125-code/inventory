@@ -288,6 +288,7 @@ tr:hover td{background:rgba(124,63,224,.04);}
     <div class="ch"><span class="ct">🚚 待出貨明細</span><span id="pending-ship-sum" style="font-size:12px;color:var(--or)"></span></div>
     <div id="pending-ship-list"></div>
   </div>
+  <div class="card">
     <div class="ch"><span class="ct">📥 匯入訂單</span><span style="font-size:11px;color:var(--t3)">支援全家好賣+ / 7-11 交貨便 Excel</span></div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
       <button class="btn" style="color:var(--bl);border-color:rgba(26,106,191,.4)" onclick="document.getElementById('imp-fami').click()">📂 全家好賣+</button>
@@ -1364,16 +1365,21 @@ function oeImpSelChange(oi,ii,val){
 function fmtDate(str){if(!str)return today();const d=new Date(str);if(!isNaN(d))return d.toISOString().slice(0,10);const m=str.match(/(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);if(m)return m[1]+'-'+m[2].padStart(2,'0')+'-'+m[3].padStart(2,'0');return today();}
 function matchProd(name,sku){const kw=name.toLowerCase().replace(/\s/g,'');let best=null,bestScore=0;db.products.filter(p=>!p.archived).forEach(p=>{const pn=p.name.toLowerCase().replace(/\s/g,'');let score=0;if(pn===kw)score=100;else if(pn.includes(kw)||kw.includes(pn))score=70;else{let m=0;for(let c of kw)if(pn.includes(c))m++;score=Math.round(m/kw.length*50);}if(score>bestScore){bestScore=score;best=p;}});if(!best||bestScore<30)return null;let mSku=null;if(sku&&best.skus&&best.skus.length){const sk=sku.toLowerCase().replace(/\s/g,'');mSku=best.skus.find(s=>s.name.toLowerCase().replace(/\s/g,'').includes(sk)||sk.includes(s.name.toLowerCase().replace(/\s/g,'')));}return{prod:best,sku:mSku,score:bestScore};}
 function showImportPrev(){
-  const tbody=document.getElementById('import-preview-body');let matchC=0,noMatchC=0;
+  const tbody=document.getElementById('import-preview-body');let matchC=0,noMatchC=0,dupC=0;
   tbody.innerHTML=pendingImport.map((o,oi)=>{
+    const isDup=!!db.orders.find(x=>x.seq===o.seq);
+    if(isDup)dupC++;
     const itemsHtml=o.items.map((item,ii)=>{
       const m=item.matched;if(m)matchC++;else noMatchC++;
       const mHtml=m?`<span style="color:var(--gn);font-size:10px">✅ ${m.prod.name}${m.sku?' · '+m.sku.name:''}</span>`:`<select id="imp-m-${oi}-${ii}" style="font-size:10px;max-width:130px" onchange="oeImpSelChange(${oi},${ii},this.value)"><option value="">-- 選擇商品 --</option><option value="__skip__">⏭ 組合／稍後編輯</option>${db.products.filter(p=>!p.archived).map(p=>(!p.skus||!p.skus.length)?`<option value="${p.id}|">${p.name}</option>`:p.skus.map(s=>`<option value="${p.id}|${s.id}">${p.name} · ${s.name}</option>`).join('')).join('')}</select>`;
       return`<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--bd);display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="flex:2;min-width:90px">${item.name}${item.sl?' / '+item.sl:''} ×${item.qty}</span><span id="imp-price-${oi}-${ii}" style="color:var(--ac);font-weight:600;white-space:nowrap">${fmt(item.itemTotal)}</span>${m?`<span style="font-size:9px;color:var(--gn)">✅系統售價</span>`:''} ${mHtml}</div>`;
     }).join('');
-    return`<tr><td style="text-align:center"><input type="checkbox" id="imp-chk-${oi}" checked/></td><td style="font-size:11px">${o.date}</td><td style="font-size:10px;color:var(--t3)">${o.seq}</td><td>${o.customer}</td><td>${itemsHtml}<div id="imp-total-${oi}" style="font-size:11px;font-weight:600;color:var(--or);padding-top:4px">小計：${fmt(o.total)}</div></td><td></td><td id="imp-total2-${oi}" style="font-weight:600">${fmt(o.total)}</td><td><span class="badge ${o.status==='已完成'?'bgdn':o.status==='已出貨'?'bgsh':'bgnew'}">${o.status}</span><br><span style="font-size:9px;color:${o.source==='全家好賣+'?'var(--bl)':o.source==='蝦皮'?'#ee4d2d':'var(--gn)'}">${o.source}</span></td><td><input id="imp-note-${oi}" placeholder="備註（選填）" value="${o.note||''}" style="min-width:110px;font-size:11px"/></td></tr>`;
+    const dupBadge=isDup?`<span style="display:inline-block;margin-left:5px;padding:1px 6px;border-radius:10px;font-size:9px;font-weight:700;background:rgba(192,48,58,.15);color:var(--rd);border:1px solid rgba(192,48,58,.35)">已存在</span>`:'';
+    const rowStyle=isDup?'background:rgba(192,48,58,.04);outline:1px solid rgba(192,48,58,.2);':'';
+    return`<tr style="${rowStyle}"><td style="text-align:center"><input type="checkbox" id="imp-chk-${oi}" ${isDup?'':'checked'}/></td><td style="font-size:11px">${o.date}</td><td style="font-size:10px;color:${isDup?'var(--rd)':'var(--t3)'};font-weight:${isDup?'700':'400'}">${o.seq}${dupBadge}</td><td>${o.customer}</td><td>${itemsHtml}<div id="imp-total-${oi}" style="font-size:11px;font-weight:600;color:var(--or);padding-top:4px">小計：${fmt(o.total)}</div></td><td></td><td id="imp-total2-${oi}" style="font-weight:600">${fmt(o.total)}</td><td><span class="badge ${o.status==='已完成'?'bgdn':o.status==='已出貨'?'bgsh':'bgnew'}">${o.status}</span><br><span style="font-size:9px;color:${o.source==='全家好賣+'?'var(--bl)':o.source==='蝦皮'?'#ee4d2d':'var(--gn)'}">${o.source}</span></td><td><input id="imp-note-${oi}" placeholder="備註（選填）" value="${o.note||''}" style="min-width:110px;font-size:11px"/></td></tr>`;
   }).join('');
-  document.getElementById('import-match-info').textContent=`共 ${pendingImport.length} 筆訂單 | 品項自動對應 ${matchC} 個 | 未對應 ${noMatchC} 個`;
+  const dupNote=dupC>0?` | <span style="color:var(--rd);font-weight:600">⚠️ 已存在 ${dupC} 筆（已自動取消勾選）</span>`:'';
+  document.getElementById('import-match-info').innerHTML=`共 ${pendingImport.length} 筆訂單 | 品項自動對應 ${matchC} 個 | 未對應 ${noMatchC} 個${dupNote}`;
   document.getElementById('import-preview').style.display='block';
 }
 function impToggleAll(checked){
