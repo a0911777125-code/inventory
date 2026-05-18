@@ -358,8 +358,7 @@ tr:hover td{background:rgba(124,63,224,.04);}
   </div>
   <div class="card">
     <div class="ch"><span class="ct">📊 各品項訂單統計</span></div>
-    <div class="tbl-wrap"><table><thead><tr><th>商品</th><th>規格</th><th>訂單筆數</th><th>已出貨</th><th>待出貨</th><th>已取消</th><th>總數量</th><th>總金額</th></tr></thead>
-    <tbody id="o-stats-table"></tbody></table></div>
+    <div id="o-stats-by-cat"></div>
     <div id="o-stats-sum" class="sumrow"></div>
   </div>
 </div>
@@ -702,6 +701,17 @@ function skuCost(p,sid){if(!sid||!p.skus||!p.skus.length)return p.cost||0;const 
 function skuPrice(p,sid){if(!sid||!p.skus||!p.skus.length)return p.price||0;const s=p.skus.find(x=>x.id==sid);return(s&&s.price>0)?s.price:(p.price||0);}
 function skuLabel(p,sid){if(!sid||!p.skus||!p.skus.length)return'';const s=p.skus.find(x=>x.id==sid);return s?s.name:'';}
 function getPending(pid,sid){return db.restock.filter(r=>r.status==='pending'&&r.productId==pid&&(sid?r.skuId==sid:!r.skuId)).reduce((s,r)=>s+r.qty,0);}
+function getOrderPending(pid,sid){
+  let need=0;
+  db.orders.filter(o=>!o.archived&&o.status!=='已取消'&&o.status!=='已完成').forEach(o=>{
+    o.items.forEach(i=>{
+      if(i.pid!=pid)return;
+      if(sid&&i.skuId!=sid)return;
+      need+=(i.qty-(i.shippedQty||0));
+    });
+  });
+  return need;
+}
 function calcInvVal(){let v=0;db.products.filter(p=>!p.archived).forEach(p=>{if(!p.skus||!p.skus.length)v+=skuStock(p)*(p.cost||0);else p.skus.forEach(s=>v+=s.stock*(s.cost||p.cost||0));});return v;}
 function getMonths(arr){return[...new Set(arr.map(r=>r.date?r.date.slice(0,7):'')).values()].filter(Boolean).sort().reverse();}
 function buildMonthOpts(id,arr){const el=document.getElementById(id);if(!el)return;const cur=el.value;const ms=getMonths(arr);el.innerHTML='<option value="">全部</option>'+ms.map(m=>`<option value="${m}">${m}</option>`).join('');if(ms.includes(cur))el.value=cur;}
@@ -772,13 +782,19 @@ function addSKU(pid){
   p.stock=skuStock(p);save();renderProducts();
 }
 function delSKU(pid,sid){if(!confirm('確定刪除？'))return;const p=db.products.find(x=>x.id==pid);if(!p)return;p.skus=p.skus.filter(s=>s.id!=sid);p.stock=skuStock(p);save();renderProducts();}
-function stockStatusHtml(actual,pending,minStock,unit){
-  const total=actual+pending;
+function stockStatusHtml(actual,pending,minStock,unit,orderNeed=0){
+  const afterOrder=actual+pending-orderNeed;
   let icon,color,text;
   if(actual<=0){icon='🔴';color='var(--rd)';text='缺貨';}
   else if(actual<=minStock){icon='🟡';color='var(--gd)';text='低庫存';}
   else{icon='🟢';color='var(--gn)';text='正常';}
-  return`<div style="min-width:90px"><div style="display:flex;align-items:center;gap:4px"><span style="font-size:10px">${icon}</span><span style="font-weight:700;color:${color}">${actual} ${unit}</span><span style="font-size:9px;color:${color}">${text}</span></div><div style="font-size:10px;color:var(--t2)">預計：<strong style="color:${pending>0?'var(--bl)':'var(--t3)'}">${total} ${unit}</strong>${pending>0?`<span style="color:var(--bl)">（+${pending}待入）</span>`:''}</div><div style="height:3px;background:var(--bg4);border-radius:2px;margin-top:2px;overflow:hidden;width:70px"><div style="height:100%;border-radius:2px;background:${color};width:${Math.min(100,actual<=0?0:Math.round(actual/Math.max(actual,minStock)*100))}%"></div></div></div>`;
+  const availColor=afterOrder<0?'var(--rd)':afterOrder<=minStock?'var(--gd)':'var(--bl)';
+  return`<div style="min-width:110px">
+    <div style="display:flex;align-items:center;gap:4px"><span style="font-size:10px">${icon}</span><span style="font-weight:700;color:${color}">${actual} ${unit}</span><span style="font-size:9px;color:${color}">${text}</span></div>
+    ${pending>0?`<div style="font-size:10px;color:var(--bl)">＋待入 <strong>${pending}</strong>${unit}</div>`:''}
+    ${orderNeed>0?`<div style="font-size:10px;color:var(--or)">－待出 <strong>${orderNeed}</strong>${unit}</div>`:''}
+    <div style="font-size:10px;border-top:1px dashed var(--bd);margin-top:2px;padding-top:2px">可用 <strong style="color:${availColor}">${afterOrder} ${unit}</strong>${afterOrder<0?` <span style="color:var(--rd);font-weight:700">⚠️需補 ${Math.abs(afterOrder)}</span>`:''}</div>
+  </div>`;
 }
 function renderProducts(){
   buildCatSel('p-cat');buildCatSel('p-filter',true);
@@ -814,10 +830,11 @@ function renderProducts(){
       const m=p.price>0&&p.cost>0?((p.price-p.cost)/p.price*100).toFixed(1):'-';
       const invVal=!p.skus||!p.skus.length?skuStock(p)*(p.cost||0):p.skus.reduce((s,sk)=>s+sk.stock*(sk.cost||p.cost||0),0);
       const actual=skuStock(p);const pending=has?p.skus.reduce((s,sk)=>s+getPending(p.id,sk.id),0):getPending(p.id,null);
+      const orderNeed=has?p.skus.reduce((s,sk)=>s+getOrderPending(p.id,sk.id),0):getOrderPending(p.id,null);
       html+=`<tr data-group="${gid}" onclick="${has?`togProd('${p.id}')`:''}">
         <td style="padding-left:22px"><span id="icon-${p.id}" class="exi" style="${has?'':'visibility:hidden'}">▶</span>${p.name}</td>
         <td><span class="ct2" style="background:${g.cat.color}22;color:${g.cat.color};border-color:${g.cat.color}44">${g.cat.name}</span></td>
-        <td>${stockStatusHtml(actual,pending,p.minStock,p.unit)}</td>
+        <td>${stockStatusHtml(actual,pending,p.minStock,p.unit,orderNeed)}</td>
         <td style="color:var(--t2)">${p.cost>0?fmt(p.cost):'-'}</td>
         <td>${p.price>0?fmt(p.price):'-'}</td>
         <td style="color:${m!=='-'?(parseFloat(m)>=0?'var(--gn)':'var(--rd)'):'var(--t3)'}">${m!=='-'?m+'%':'-'}</td>
@@ -830,11 +847,11 @@ function renderProducts(){
       </tr>`;
       if(has){
         html+=`<tr data-group="${gid}" id="det-${p.id}" class="skudr"><td class="skudc" colspan="8"><div class="skuin">`;
-        html+=`<table><thead><tr><th>規格</th><th>實際庫存</th><th>待入庫</th><th>預計庫存</th><th>成本</th><th>售價</th><th>毛利率</th><th>現值</th><th>操作</th></tr></thead><tbody>`;
+        html+=`<table><thead><tr><th>規格</th><th>實際庫存</th><th>待入庫</th><th>待出貨</th><th>預估可用</th><th>成本</th><th>售價</th><th>毛利率</th><th>現值</th><th>操作</th></tr></thead><tbody>`;
         html+=p.skus.map(s=>{
           const sm=s.price>0&&s.cost>0?((s.price-s.cost)/s.price*100).toFixed(1):'-';
-          const sv=s.stock*(s.cost||p.cost||0);const pend=getPending(p.id,s.id);const low=s.stock<=p.minStock;
-          return`<tr><td>${s.name}</td><td style="color:${s.stock<=0?'var(--rd)':low?'var(--gd)':'var(--gn)'};font-weight:600">${s.stock<=0?'🔴':low?'🟡':'🟢'} ${s.stock} ${p.unit}</td><td style="color:${pend>0?'var(--bl)':'var(--t3)'}">${pend>0?'+'+pend:'-'}</td><td style="color:var(--bl);font-weight:600">${s.stock+pend} ${p.unit}</td><td style="color:var(--t2)">${s.cost>0?fmt(s.cost):'-'}</td><td>${s.price>0?fmt(s.price):'-'}</td><td style="color:${sm!=='-'?(parseFloat(sm)>=0?'var(--gn)':'var(--rd)'):'var(--t3)'}">${sm!=='-'?sm+'%':'-'}</td><td style="color:var(--or)">${sv>0?fmt(sv):'-'}</td><td><button class="btn bd2 bs" onclick="delSKU('${p.id}','${s.id}')">刪除</button></td></tr>`;
+          const sv=s.stock*(s.cost||p.cost||0);const pend=getPending(p.id,s.id);const oNeed=getOrderPending(p.id,s.id);const low=s.stock<=p.minStock;const avail=s.stock+pend-oNeed;
+          return`<tr><td>${s.name}</td><td style="color:${s.stock<=0?'var(--rd)':low?'var(--gd)':'var(--gn)'};font-weight:600">${s.stock<=0?'🔴':low?'🟡':'🟢'} ${s.stock} ${p.unit}</td><td style="color:${pend>0?'var(--bl)':'var(--t3)'}">${pend>0?'+'+pend:'-'}</td><td style="color:${oNeed>0?'var(--or)':'var(--t3)'}">${oNeed>0?'-'+oNeed:'-'}</td><td style="color:${avail<0?'var(--rd)':avail<=p.minStock?'var(--gd)':'var(--bl)'};font-weight:700">${avail} ${p.unit}${avail<0?` <span style="font-size:10px">⚠️需補${Math.abs(avail)}</span>`:''}</td><td style="color:var(--t2)">${s.cost>0?fmt(s.cost):'-'}</td><td>${s.price>0?fmt(s.price):'-'}</td><td style="color:${sm!=='-'?(parseFloat(sm)>=0?'var(--gn)':'var(--rd)'):'var(--t3)'}">${sm!=='-'?sm+'%':'-'}</td><td style="color:var(--or)">${sv>0?fmt(sv):'-'}</td><td><button class="btn bd2 bs" onclick="delSKU('${p.id}','${s.id}')">刪除</button></td></tr>`;
         }).join('');
         html+=`</tbody></table><div class="skuadd"><input id="ask-n-${p.id}" placeholder="新規格名稱" style="flex:2;min-width:80px"/><input id="ask-s-${p.id}" type="number" min="0" placeholder="庫存" style="flex:1;min-width:50px"/><input id="ask-c-${p.id}" type="number" min="0" placeholder="成本" style="flex:1;min-width:50px"/><input id="ask-p-${p.id}" type="number" min="0" placeholder="售價" style="flex:1;min-width:50px"/><button class="btn bs bp" onclick="addSKU('${p.id}')">加入規格</button></div></div></td></tr>`;
       }
@@ -1235,36 +1252,61 @@ function renderPendingStockSummary(){
   db.orders.filter(o=>!o.archived&&o.status!=='已取消'&&o.status!=='已完成').forEach(o=>{
     o.items.forEach(i=>{
       const need=i.qty-(i.shippedQty||0);if(need<=0)return;
-      const key=i.pid+'|'+(i.skuId||'');
-      if(!map[key])map[key]={name:i.name,sku:i.skuLabel||'',need:0,stock:0,short:0};
+      const p2=db.products.find(x=>x.id==i.pid);
+      const hasSku=p2&&p2.skus&&p2.skus.length>0;
+      const skuLabel=hasSku?(i.skuLabel||''):'';
+      const key=(i.pid||i.name)+'|'+skuLabel;
+      if(!map[key])map[key]={name:p2?p2.name:i.name,sku:skuLabel,pid:i.pid||'',skuId:i.skuId||'',need:0,stock:0,short:0};
       map[key].need+=need;
     });
   });
   if(!Object.keys(map).length){el.innerHTML='';return;}
-  // 補庫存數
   Object.keys(map).forEach(key=>{
-    const [pid,skuId]=key.split('|');
-    const p=db.products.find(x=>x.id==pid);if(!p)return;
-    const st=skuId?(p.skus&&p.skus.find(s=>s.id==skuId)?.stock||0):(p.stock||0);
-    map[key].stock=st;
-    map[key].short=Math.max(0,map[key].need-st);
+    const r=map[key];
+    const p=db.products.find(x=>x.id==r.pid);if(!p)return;
+    const st=r.skuId?(p.skus&&p.skus.find(s=>s.id==r.skuId)?.stock||0):(p.stock||0);
+    r.stock=st;r.short=Math.max(0,r.need-st);
   });
-  const rows=Object.values(map).sort((a,b)=>b.short-a.short||b.need-a.need);
-  el.innerHTML=`<div style="border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:4px">
-    <div style="padding:8px 12px;background:rgba(201,150,10,.06);border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:11px;font-weight:600;color:var(--t2)">📦 備貨清單（共 ${rows.length} 種）</span>
-      <span style="font-size:10px;color:var(--t3)">${rows.filter(r=>r.short>0).length} 種庫存不足</span>
+  // 依類別分組
+  const catMap={};
+  Object.values(map).forEach(r=>{
+    const p=db.products.find(x=>x.id==r.pid);
+    const cat=p?(db.cats||[]).find(c=>c.id==p.catId):null;
+    const catId=cat?cat.id:'__other__';
+    const catName=cat?cat.name:'未分類';
+    if(!catMap[catId])catMap[catId]={name:catName,items:[]};
+    catMap[catId].items.push(r);
+  });
+  Object.values(catMap).forEach(cg=>cg.items.sort((a,b)=>b.short-a.short||b.need-a.need));
+  const totalKinds=Object.values(map).length;
+  const shortKinds=Object.values(map).filter(r=>r.short>0).length;
+  const catColors=['var(--bl)','var(--gn)','var(--or)','var(--ac)'];
+  const catIds=Object.keys(catMap);
+  el.innerHTML=`<div style="margin-bottom:4px">
+    <div style="padding:7px 12px;background:rgba(201,150,10,.06);border:1px solid var(--bd);border-radius:10px 10px 0 0;display:flex;justify-content:space-between;align-items:center;border-bottom:none">
+      <span style="font-size:11px;font-weight:600;color:var(--t2)">📦 備貨清單（共 ${totalKinds} 種）</span>
+      <span style="font-size:10px;color:${shortKinds>0?'var(--rd)':'var(--gn)'};font-weight:600">${shortKinds>0?'⚠️ '+shortKinds+' 種庫存不足':'✅ 庫存充足'}</span>
     </div>
-    ${rows.map(r=>{
-      const ok=r.short===0;
-      return`<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--bd);background:${ok?'':'rgba(192,48,58,.03)'}">
-        <div style="flex:1;min-width:0">
-          <span style="font-weight:500;font-size:12px">${r.name}</span>
-          ${r.sku&&r.sku!=='-'?`<span style="font-size:10px;color:var(--t3);margin-left:4px">${r.sku}</span>`:''}
+    ${catIds.map((cid,ci)=>{
+      const cg=catMap[cid];
+      const cShort=cg.items.filter(r=>r.short>0).length;
+      return`<div style="border:1px solid var(--bd);border-top:none${ci===catIds.length-1?';border-radius:0 0 10px 10px':''}">
+        <div style="padding:6px 12px;background:rgba(0,0,0,.02);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--bd)">
+          <span style="font-size:11px;font-weight:700;color:${catColors[ci%catColors.length]}">${cg.name}</span>
+          <span style="font-size:10px;color:var(--t3)">${cg.items.length} 種${cShort>0?`｜<span style="color:var(--rd)">缺 ${cShort} 種</span>`:''}</span>
         </div>
-        <span style="font-size:11px;color:var(--t2);white-space:nowrap">需出 <strong>${r.need}</strong></span>
-        <span style="font-size:11px;color:var(--t3);white-space:nowrap">庫存 ${r.stock}</span>
-        <span style="min-width:52px;text-align:right;font-size:11px;font-weight:700;color:${ok?'var(--gn)':'var(--rd)'};white-space:nowrap">${ok?'✅ 足夠':'⚠️ 缺 '+r.short}</span>
+        ${cg.items.map(r=>{
+          const ok=r.short===0;
+          return`<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--bd);background:${ok?'':'rgba(192,48,58,.03)'}">
+            <div style="flex:1;min-width:0">
+              <span style="font-weight:500;font-size:12px">${r.name}</span>
+              ${r.sku&&r.sku!=='-'?`<span style="font-size:10px;color:var(--t3);margin-left:4px">${r.sku}</span>`:''}
+            </div>
+            <span style="font-size:11px;color:var(--t2);white-space:nowrap">需出 <strong>${r.need}</strong></span>
+            <span style="font-size:11px;color:var(--t3);white-space:nowrap">庫存 ${r.stock}</span>
+            <span style="min-width:52px;text-align:right;font-size:11px;font-weight:700;color:${ok?'var(--gn)':'var(--rd)'};white-space:nowrap">${ok?'✅ 足夠':'⚠️ 缺 '+r.short}</span>
+          </div>`;
+        }).join('')}
       </div>`;
     }).join('')}
   </div>`;
@@ -1324,9 +1366,15 @@ function renderOrders(){
   const rev=rows.reduce((s,o)=>s+o.total,0),profit=rows.reduce((s,o)=>s+(o.totalProfit||0),0);
   document.getElementById('o-sum').innerHTML=`<span>共 ${rows.length} 筆 │ 收入：<strong>${fmt(rev)}</strong> │ 利潤：<strong style="color:${profit>=0?'var(--gn)':'var(--rd)'}">${fmt(profit)}</strong></span>`;
   // 品項統計
-  const om={};rows.forEach(o=>{o.items.forEach(i=>{const key=i.name+(i.skuLabel?'|'+i.skuLabel:'');if(!om[key])om[key]={name:i.name,sku:i.skuLabel||'',orders:0,shippedO:0,pendingO:0,cancelledO:0,totalQty:0,shippedQty:0,pendingQty:0,amount:0};om[key].orders++;om[key].totalQty+=i.qty;om[key].shippedQty+=i.shippedQty||0;om[key].pendingQty+=(i.qty-(i.shippedQty||0));om[key].amount+=i.qty*i.price;if(o.status==='已出貨'||o.status==='已完成')om[key].shippedO++;else if(o.status==='已取消')om[key].cancelledO++;else om[key].pendingO++;});});
+  const om={};rows.forEach(o=>{o.items.forEach(i=>{const p2=db.products.find(x=>x.id==i.pid);const hasSku=p2&&p2.skus&&p2.skus.length>0;const skuLabel=hasSku?(i.skuLabel||''):'';const key=(i.pid||i.name)+'|'+skuLabel;if(!om[key])om[key]={name:p2?p2.name:i.name,sku:skuLabel,pid:i.pid||'',orders:0,shippedO:0,pendingO:0,cancelledO:0,totalQty:0,shippedQty:0,pendingQty:0,amount:0};om[key].orders++;om[key].totalQty+=i.qty;om[key].shippedQty+=i.shippedQty||0;om[key].pendingQty+=(i.qty-(i.shippedQty||0));om[key].amount+=i.qty*i.price;if(o.status==='已出貨'||o.status==='已完成')om[key].shippedO++;else if(o.status==='已取消')om[key].cancelledO++;else om[key].pendingO++;});});
   const oStats=Object.values(om).sort((a,b)=>b.orders-a.orders);
-  document.getElementById('o-stats-table').innerHTML=oStats.length?oStats.map(x=>`<tr><td style="font-weight:500">${x.name}</td><td style="color:var(--t2);font-size:11px">${x.sku||'—'}</td><td style="font-weight:700;color:var(--ac);text-align:center">${x.orders} 筆</td><td style="text-align:center"><span style="color:var(--gn);font-weight:600">${x.shippedO} 筆</span><span style="color:var(--t3);font-size:11px">（${x.shippedQty}件）</span></td><td style="text-align:center">${x.pendingQty>0?`<span style="color:var(--or);font-weight:700">${x.pendingO} 筆</span><span style="color:var(--t3);font-size:11px">（待出${x.pendingQty}件）</span>`:'<span style="color:var(--t3)">—</span>'}</td><td style="text-align:center;color:${x.cancelledO>0?'var(--rd)':'var(--t3)'}">${x.cancelledO>0?x.cancelledO+'筆':'—'}</td><td style="text-align:center;color:var(--t2)">${x.totalQty}件</td><td style="font-weight:600">${fmt(x.amount)}</td></tr>`).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:14px">此期間無訂單</td></tr>';
+  const catMap={};
+  oStats.forEach(x=>{const p=db.products.find(pr=>pr.id==x.pid);const cat=p?db.cats.find(c=>c.id==p.catId):null;const catId=cat?cat.id:'__other__';const catName=cat?cat.name:'未分類';if(!catMap[catId])catMap[catId]={name:catName,items:[]};catMap[catId].items.push(x);});
+  const rowHtml=x=>`<div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:6px 12px;align-items:center;padding:7px 10px;border-bottom:1px solid var(--bd);font-size:12px"><div><span style="font-weight:500">${x.name}</span>${x.sku&&x.sku!=='-'?`<span style="font-size:10px;color:var(--t3);margin-left:4px">· ${x.sku}</span>`:''}</div><div style="text-align:center;color:var(--ac);font-weight:700;white-space:nowrap">${x.orders} 筆</div><div style="text-align:center;white-space:nowrap">${x.pendingQty>0?`<span style="color:var(--or);font-weight:700">待出 ${x.pendingQty}</span>`:'<span style="color:var(--gn)">✅</span>'}</div><div style="text-align:center;color:var(--t2);white-space:nowrap">${x.totalQty} 件</div><div style="text-align:right;font-weight:600;white-space:nowrap">${fmt(x.amount)}</div></div>`;
+  const catColors=['var(--bl)','var(--gn)','var(--or)','var(--ac)'];
+  const catIds=Object.keys(catMap);
+  const statsHTML=catIds.length?catIds.map((cid,ci)=>{const cg=catMap[cid];const cTotal=cg.items.reduce((s,x)=>s+x.amount,0);const cPend=cg.items.reduce((s,x)=>s+x.pendingQty,0);return`<div style="margin-bottom:10px;border:1px solid var(--bd);border-radius:10px;overflow:hidden"><div style="padding:7px 10px;background:rgba(0,0,0,.025);display:flex;justify-content:space-between;align-items:center"><span style="font-size:11px;font-weight:700;color:${catColors[ci%catColors.length]}">${cg.name}</span><span style="font-size:10px;color:var(--t3)">${cg.items.length} 種｜${fmt(cTotal)}${cPend>0?`｜<span style="color:var(--or)">待出 ${cPend} 件</span>`:''}</span></div><div style="padding:0 0 1px"><div style="display:grid;grid-template-columns:1fr auto auto auto auto;gap:6px 12px;padding:5px 10px;font-size:10px;color:var(--t3);border-bottom:1px solid var(--bd)"><span>商品</span><span style="text-align:center">訂單</span><span style="text-align:center">待出</span><span style="text-align:center">數量</span><span style="text-align:right">金額</span></div>${cg.items.map(rowHtml).join('')}</div></div>`;}).join(''):'<div style="text-align:center;color:var(--t3);padding:14px">此期間無訂單</div>';
+  document.getElementById('o-stats-by-cat').innerHTML=statsHTML;
   const totPend=oStats.reduce((s,x)=>s+x.pendingQty,0);
   document.getElementById('o-stats-sum').innerHTML=oStats.length?`<span>${totPend>0?`<span style="color:var(--or);font-weight:600;margin-right:8px">⚠ 待出貨 ${totPend} 件</span>`:'✅ 全部出貨完成'}共 ${oStats.length} 種品項</span>`:'';
   renderPendingShip();
