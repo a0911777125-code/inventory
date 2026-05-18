@@ -285,7 +285,15 @@ tr:hover td{background:rgba(124,63,224,.04);}
 <!-- ORDERS -->
 <div id="tab-orders" class="sec">
   <div class="card" style="border:1px solid rgba(192,94,16,.3);background:rgba(192,94,16,.03)">
-    <div class="ch"><span class="ct">🚚 待出貨明細</span><span id="pending-ship-sum" style="font-size:12px;color:var(--or)"></span></div>
+    <div class="ch">
+      <span class="ct">🚚 待出貨</span>
+      <span id="pending-ship-sum" style="font-size:12px;color:var(--or)"></span>
+      <span style="margin-left:auto;display:flex;gap:4px">
+        <button id="pv-tab-order" class="btn bs" style="font-size:11px;background:var(--or);color:#fff;border-color:var(--or)" onclick="switchPendingView('order')">訂單視圖</button>
+        <button id="pv-tab-stock" class="btn bs" style="font-size:11px" onclick="switchPendingView('stock')">備貨視圖</button>
+      </span>
+    </div>
+    <div id="pending-stock-summary" style="display:none"></div>
     <div id="pending-ship-list"></div>
   </div>
   <div class="card">
@@ -1077,6 +1085,11 @@ function archiveOrder(id){
   if(!confirm(`確定封存訂單「${o.seq}」？`))return;
   o.archived=true;save();renderOrders();
 }
+function deleteOrder(id){
+  const o=db.orders.find(x=>x.id==id);if(!o)return;
+  if(!confirm(`確定刪除訂單「${o.seq}」？\n⚠️ 刪除後可重新匯入，此動作無法復原。`))return;
+  db.orders=db.orders.filter(x=>x.id!==id);save();renderOrders();
+}
 function openOEditModal(id){
   const o=db.orders.find(x=>x.id==id);if(!o)return;editingOId=id;
   document.getElementById('oe-cust').value=o.customer||'';
@@ -1198,7 +1211,67 @@ function confirmPartial(){
   const allDone=o.items.every(i=>(i.shippedQty||0)>=i.qty);if(allDone)o.status='已出貨';
   save();closeModal('m-partial');renderOrders();buildMonthOpts('so-month',db.shipout);alert(`✅ 出貨完成！${allDone?'全數出貨。':'部分出貨。'}`);
 }
+let pendingView='order';
+function switchPendingView(v){
+  pendingView=v;
+  const btnO=document.getElementById('pv-tab-order');
+  const btnS=document.getElementById('pv-tab-stock');
+  const listEl=document.getElementById('pending-ship-list');
+  const sumEl=document.getElementById('pending-stock-summary');
+  if(v==='order'){
+    btnO.style.background='var(--or)';btnO.style.color='#fff';btnO.style.borderColor='var(--or)';
+    btnS.style.background='';btnS.style.color='';btnS.style.borderColor='';
+    listEl.style.display='';sumEl.style.display='none';
+  } else {
+    btnS.style.background='var(--or)';btnS.style.color='#fff';btnS.style.borderColor='var(--or)';
+    btnO.style.background='';btnO.style.color='';btnO.style.borderColor='';
+    listEl.style.display='none';sumEl.style.display='';
+  }
+  renderPendingShip();
+}
+function renderPendingStockSummary(){
+  const el=document.getElementById('pending-stock-summary');if(!el)return;
+  const map={};
+  db.orders.filter(o=>!o.archived&&o.status!=='已取消'&&o.status!=='已完成').forEach(o=>{
+    o.items.forEach(i=>{
+      const need=i.qty-(i.shippedQty||0);if(need<=0)return;
+      const key=i.pid+'|'+(i.skuId||'');
+      if(!map[key])map[key]={name:i.name,sku:i.skuLabel||'',need:0,stock:0,short:0};
+      map[key].need+=need;
+    });
+  });
+  if(!Object.keys(map).length){el.innerHTML='';return;}
+  // 補庫存數
+  Object.keys(map).forEach(key=>{
+    const [pid,skuId]=key.split('|');
+    const p=db.products.find(x=>x.id==pid);if(!p)return;
+    const st=skuId?(p.skus&&p.skus.find(s=>s.id==skuId)?.stock||0):(p.stock||0);
+    map[key].stock=st;
+    map[key].short=Math.max(0,map[key].need-st);
+  });
+  const rows=Object.values(map).sort((a,b)=>b.short-a.short||b.need-a.need);
+  el.innerHTML=`<div style="border:1px solid var(--bd);border-radius:10px;overflow:hidden;margin-bottom:4px">
+    <div style="padding:8px 12px;background:rgba(201,150,10,.06);border-bottom:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:11px;font-weight:600;color:var(--t2)">📦 備貨清單（共 ${rows.length} 種）</span>
+      <span style="font-size:10px;color:var(--t3)">${rows.filter(r=>r.short>0).length} 種庫存不足</span>
+    </div>
+    ${rows.map(r=>{
+      const ok=r.short===0;
+      return`<div style="display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--bd);background:${ok?'':'rgba(192,48,58,.03)'}">
+        <div style="flex:1;min-width:0">
+          <span style="font-weight:500;font-size:12px">${r.name}</span>
+          ${r.sku&&r.sku!=='-'?`<span style="font-size:10px;color:var(--t3);margin-left:4px">${r.sku}</span>`:''}
+        </div>
+        <span style="font-size:11px;color:var(--t2);white-space:nowrap">需出 <strong>${r.need}</strong></span>
+        <span style="font-size:11px;color:var(--t3);white-space:nowrap">庫存 ${r.stock}</span>
+        <span style="min-width:52px;text-align:right;font-size:11px;font-weight:700;color:${ok?'var(--gn)':'var(--rd)'};white-space:nowrap">${ok?'✅ 足夠':'⚠️ 缺 '+r.short}</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
 function renderPendingShip(){
+  if(pendingView==='stock'){renderPendingStockSummary();return;}
+  renderPendingStockSummary();
   const el=document.getElementById('pending-ship-list');
   const sumEl=document.getElementById('pending-ship-sum');
   if(!el)return;
@@ -1246,7 +1319,7 @@ function renderOrders(){
   const bm={'新訂單':'bgnew','已出貨':'bgsh','已完成':'bgdn','已取消':'bgcl'};
   document.getElementById('o-table').innerHTML=rows.length?rows.map(o=>{
     const tQ=o.items.reduce((s,i)=>s+i.qty,0),sQ=o.items.reduce((s,i)=>s+(i.shippedQty||0),0),prog=tQ>0?Math.round(sQ/tQ*100):0;
-    return`<tr><td style="font-size:10px;color:var(--t3)">${o.seq}</td><td>${o.date}</td><td>${o.customer}</td><td style="font-size:11px;color:var(--t2)">${o.items.map(i=>`${i.name}${i.skuLabel?' · '+i.skuLabel:''}×${i.qty}${(i.shippedQty&&i.shippedQty>0)?`<span style="color:var(--gn);font-size:10px">（已出${i.shippedQty}）</span>`:''}`).join('、')}</td><td style="font-weight:600">${fmt(o.total)}<div style="font-size:10px;color:var(--t3)">出貨 ${sQ}/${tQ} 件 <span style="color:${sQ>=tQ?'var(--gn)':'var(--or)'}">${prog}%</span></div></td><td style="color:${(o.totalProfit||0)>=0?'var(--gn)':'var(--rd)'};font-weight:600">${fmt(o.totalProfit||0)}</td><td><span class="badge ${bm[o.status]||'bgnew'}">${o.status}</span></td><td style="display:flex;gap:4px;flex-wrap:wrap">${o.status!=='已取消'&&o.status!=='已完成'?`<button class="btn bs bor" onclick="openPartialModal('${o.id}')">🚚出貨</button>`:''}<select style="font-size:11px;padding:2px 6px;background:#fff;color:var(--t1);border:1px solid var(--bd)" onchange="updOS('${o.id}',this.value)"><option ${o.status==='新訂單'?'selected':''}>新訂單</option><option ${o.status==='已出貨'?'selected':''}>已出貨</option><option ${o.status==='已完成'?'selected':''}>已完成</option><option ${o.status==='已取消'?'selected':''}>已取消</option></select><button class="btn bs" style="color:var(--ac);border-color:var(--bd)" onclick="openOEditModal('${o.id}')">編輯</button><button class="btn bd2 bs" onclick="archiveOrder('${o.id}')">封存</button></td></tr>`;
+    return`<tr><td style="font-size:10px;color:var(--t3)">${o.seq}</td><td>${o.date}</td><td>${o.customer}</td><td style="font-size:11px;color:var(--t2)">${o.items.map(i=>`${i.name}${i.skuLabel?' · '+i.skuLabel:''}×${i.qty}${(i.shippedQty&&i.shippedQty>0)?`<span style="color:var(--gn);font-size:10px">（已出${i.shippedQty}）</span>`:''}`).join('、')}</td><td style="font-weight:600">${fmt(o.total)}<div style="font-size:10px;color:var(--t3)">出貨 ${sQ}/${tQ} 件 <span style="color:${sQ>=tQ?'var(--gn)':'var(--or)'}">${prog}%</span></div></td><td style="color:${(o.totalProfit||0)>=0?'var(--gn)':'var(--rd)'};font-weight:600">${fmt(o.totalProfit||0)}</td><td><span class="badge ${bm[o.status]||'bgnew'}">${o.status}</span></td><td style="display:flex;gap:4px;flex-wrap:wrap">${o.status!=='已取消'&&o.status!=='已完成'?`<button class="btn bs bor" onclick="openPartialModal('${o.id}')">🚚出貨</button>`:''}<select style="font-size:11px;padding:2px 6px;background:#fff;color:var(--t1);border:1px solid var(--bd)" onchange="updOS('${o.id}',this.value)"><option ${o.status==='新訂單'?'selected':''}>新訂單</option><option ${o.status==='已出貨'?'selected':''}>已出貨</option><option ${o.status==='已完成'?'selected':''}>已完成</option><option ${o.status==='已取消'?'selected':''}>已取消</option></select><button class="btn bs" style="color:var(--ac);border-color:var(--bd)" onclick="openOEditModal('${o.id}')">編輯</button><button class="btn bd2 bs" onclick="archiveOrder('${o.id}')">封存</button><button class="btn bs" style="color:var(--rd);border-color:rgba(192,48,58,.3)" onclick="deleteOrder('${o.id}')">刪除</button></td></tr>`;
   }).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:20px">此期間無訂單</td></tr>';
   const rev=rows.reduce((s,o)=>s+o.total,0),profit=rows.reduce((s,o)=>s+(o.totalProfit||0),0);
   document.getElementById('o-sum').innerHTML=`<span>共 ${rows.length} 筆 │ 收入：<strong>${fmt(rev)}</strong> │ 利潤：<strong style="color:${profit>=0?'var(--gn)':'var(--rd)'}">${fmt(profit)}</strong></span>`;
@@ -1372,23 +1445,23 @@ function mapShopeeSt(s){return s.includes('已完成')||s.includes('完成')?'�
 // 匯入預覽選擇商品後自動帶入系統售價
 function oeImpSelChange(oi,ii,val){
   const o=pendingImport[oi];if(!o||!o.items[ii])return;
-  if(val){
+  if(val&&val!=='__skip__'){
     const parts=val.split('|'),pid=parts[0],skuId=parts[1]||null;
     const p=db.products.find(x=>x.id==pid);
     if(p){
+      const sk=skuId&&p.skus?p.skus.find(s=>s.id==skuId):null;
+      o.items[ii].matched={prod:p,sku:sk||null};
       const price=skuPrice(p,skuId)||0;
-      if(price>0){
-        o.items[ii].price=price;
-        o.items[ii].itemTotal=price*o.items[ii].qty;
-      }
+      if(price>0){o.items[ii].price=price;o.items[ii].itemTotal=price*o.items[ii].qty;}
     }
+  } else if(val==='__skip__'){
+    o.items[ii].matched=null;
+  } else {
+    o.items[ii].matched=null;
   }
-  // 更新訂單總額顯示（不重新渲染整個表格）
   o.total=o.items.reduce((s,i)=>s+i.itemTotal,0);
-  // 只更新該品項的金額顯示
   const priceEl=document.getElementById(`imp-price-${oi}-${ii}`);
   if(priceEl)priceEl.textContent=fmt(o.items[ii].itemTotal);
-  // 更新訂單小計顯示
   const totalEl=document.getElementById(`imp-total-${oi}`);
   if(totalEl)totalEl.textContent='小計：'+fmt(o.total);
   const totalEl2=document.getElementById(`imp-total2-${oi}`);
