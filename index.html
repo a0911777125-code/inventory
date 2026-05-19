@@ -673,15 +673,29 @@ let tmpOItems=[],newSKURs=[],epSkus=[],editingProdId=null,editingRSId=null,editi
 
 // ─── UTILS ───
 function save(){
-  db._savedAt=Date.now();
   try{localStorage.setItem(STORAGE_KEY,JSON.stringify(db));}catch(e){}
   if(!SCRIPT_URL)return;
   setSS('syncing');
-  fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify({products:db.products,restock:db.restock,shipout:db.shipout,orders:db.orders,customers:db.customers,cats:db.cats,stores:db.stores,adjustments:db.adjustments,finAdj:db.finAdj,meta:{orderSeq:db.orderSeq,savedAt:db._savedAt}})})
+  fetch(SCRIPT_URL,{method:'POST',body:JSON.stringify({products:db.products,restock:db.restock,shipout:db.shipout,orders:db.orders,customers:db.customers,cats:db.cats,stores:db.stores,adjustments:db.adjustments,finAdj:db.finAdj,meta:{orderSeq:db.orderSeq}})})
   .then(r=>r.json()).then(r=>setSS(r.ok?'ok':'error')).catch(()=>setSS('error'));
 }
 function load(cb){
   try{const r=localStorage.getItem(STORAGE_KEY);if(r)db=JSON.parse(r);}catch(e){}
+  if(!SCRIPT_URL){cb&&cb();return;}
+  setSS('syncing');
+  fetch(SCRIPT_URL).then(r=>r.json()).then(r=>{
+    if(r.ok&&r.data){const d=r.data;
+      db.products=d.products||db.products||[];db.restock=d.restock||db.restock||[];
+      db.shipout=d.shipout||db.shipout||[];db.orders=d.orders||db.orders||[];
+      db.customers=d.customers||db.customers||[];db.cats=d.cats||db.cats||[];
+      db.stores=d.stores||db.stores||[];db.adjustments=d.adjustments||db.adjustments||[];
+      db.finAdj=d.finAdj||db.finAdj||[];db.orderSeq=d.meta?.orderSeq||db.orderSeq||1;
+      try{localStorage.setItem(STORAGE_KEY,JSON.stringify(db));}catch(e){}
+      setSS('ok');
+    }else setSS('error');
+    cb&&cb();
+  }).catch(()=>{setSS('error');cb&&cb();});
+}
   if(!SCRIPT_URL){cb&&cb();return;}
   setSS('syncing');
   fetch(SCRIPT_URL).then(r=>r.json()).then(r=>{
