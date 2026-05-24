@@ -342,6 +342,10 @@ tr:hover td{background:rgba(124,63,224,.04);}
       <div class="fg"><label>門市名稱</label><input id="o-rbranch" placeholder="例：台中文心門市"/></div>
     </div>
     <div class="fr"><div class="fg"><label>備註</label><input id="o-note"/></div></div>
+    <div class="fr">
+      <div class="fg"><label>運費（墊付）</label><input id="o-freight" type="number" min="0" placeholder="0" style="max-width:100px"/></div>
+      <div class="fg"><label>實際收款 <span style="font-size:10px;color:var(--t3)">（含運費，空白=訂單金額）</span></label><input id="o-actual" type="number" min="0" placeholder="自動帶入"/></div>
+    </div>
     <button class="btn bp" onclick="submitOrder()">建立訂單</button>
   </div>
   <div class="card">
@@ -624,6 +628,10 @@ tr:hover td{background:rgba(124,63,224,.04);}
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:9px">
       <div class="fg"><label>狀態</label><select id="oe-status"><option>新訂單</option><option>已出貨</option><option>已完成</option><option>已取消</option></select></div>
       <div class="fg"><label>備註</label><input id="oe-note"/></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:9px">
+      <div class="fg"><label>運費（墊付）</label><input id="oe-freight" type="number" min="0" placeholder="0"/></div>
+      <div class="fg"><label>實際收款</label><input id="oe-actual" type="number" min="0" placeholder="同訂單金額"/></div>
     </div>
     <div style="font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.6px;border-top:1px dashed var(--bd);padding:8px 0 6px">📦 收件資料</div>
     <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:9px;margin-bottom:9px">
@@ -1104,11 +1112,16 @@ function remOItem(i){tmpOItems.splice(i,1);renderTmpItems();}
 function submitOrder(){
   const cust=document.getElementById('o-cust').value.trim();if(!cust)return alert('請輸入客戶名稱');if(!tmpOItems.length)return alert('請加入品項');
   const total=tmpOItems.reduce((s,i)=>s+i.qty*i.price,0),tp=tmpOItems.reduce((s,i)=>s+(i.price-i.cost)*i.qty,0);
-  db.orders.unshift({id:uid(),seq:'ORD-'+String(db.orderSeq++).padStart(4,'0'),date:document.getElementById('o-date').value||today(),customer:cust,items:[...tmpOItems],total,totalProfit:tp,note:document.getElementById('o-note').value,status:'新訂單',rname:document.getElementById('o-rname').value.trim(),rphone:document.getElementById('o-rphone').value.trim(),rstore:document.getElementById('o-rstore').value,rbranch:document.getElementById('o-rbranch').value.trim()});
+  const freight=parseFloat(document.getElementById('o-freight').value)||0;
+  const actualInput=document.getElementById('o-actual').value;
+  const actual=actualInput?parseFloat(actualInput):null;
+  db.orders.unshift({id:uid(),seq:'ORD-'+String(db.orderSeq++).padStart(4,'0'),date:document.getElementById('o-date').value||today(),customer:cust,items:[...tmpOItems],total,totalProfit:tp,note:document.getElementById('o-note').value,status:'新訂單',rname:document.getElementById('o-rname').value.trim(),rphone:document.getElementById('o-rphone').value.trim(),rstore:document.getElementById('o-rstore').value,rbranch:document.getElementById('o-rbranch').value.trim(),freight,actual});
   syncCustomerFromOrder(db.orders[0]);
   save();tmpOItems=[];renderTmpItems();popPS('o-prod');buildMonthOpts('o-month',db.orders);renderOrders();
   ['o-cust','o-note','o-rname','o-rphone','o-rbranch'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('o-rstore').value='';
+  document.getElementById('o-freight').value='';
+  document.getElementById('o-actual').value='';
 }
 function updOS(id,status){const o=db.orders.find(x=>x.id==id);if(o){o.status=status;save();renderOrders();}}
 function archiveOrder(id){
@@ -1125,6 +1138,8 @@ function openOEditModal(id){
   const o=db.orders.find(x=>x.id==id);if(!o)return;editingOId=id;
   document.getElementById('oe-cust').value=o.customer||'';
   document.getElementById('oe-date').value=o.date||today();document.getElementById('oe-status').value=o.status||'新訂單';document.getElementById('oe-note').value=o.note||'';
+  document.getElementById('oe-freight').value=o.freight||'';
+  document.getElementById('oe-actual').value=o.actual!=null?o.actual:'';
   document.getElementById('oe-rname').value=o.rname||'';document.getElementById('oe-rphone').value=o.rphone||'';
   document.getElementById('oe-rstore').value=o.rstore||'';document.getElementById('oe-rbranch').value=o.rbranch||'';
   renderOEItems();openModal('m-o-edit');
@@ -1188,6 +1203,9 @@ function saveOEdit(){
   o.date=document.getElementById('oe-date').value||o.date;
   o.status=document.getElementById('oe-status').value;
   o.note=document.getElementById('oe-note').value;
+  o.freight=parseFloat(document.getElementById('oe-freight').value)||0;
+  const av=document.getElementById('oe-actual').value;
+  o.actual=av?parseFloat(av):null;
   o.rname=document.getElementById('oe-rname').value.trim();
   o.rphone=document.getElementById('oe-rphone').value.trim();
   o.rstore=document.getElementById('oe-rstore').value;
@@ -1379,7 +1397,7 @@ function renderOrders(){
   const bm={'新訂單':'bgnew','已出貨':'bgsh','已完成':'bgdn','已取消':'bgcl'};
   document.getElementById('o-table').innerHTML=rows.length?rows.map(o=>{
     const tQ=o.items.reduce((s,i)=>s+i.qty,0),sQ=o.items.reduce((s,i)=>s+(i.shippedQty||0),0),prog=tQ>0?Math.round(sQ/tQ*100):0;
-    return`<tr><td style="font-size:10px;color:var(--t3)">${o.seq}</td><td>${o.date}</td><td>${o.customer}</td><td style="font-size:11px;color:var(--t2)">${o.items.map(i=>`${i.name}${i.skuLabel?' · '+i.skuLabel:''}×${i.qty}${(i.shippedQty&&i.shippedQty>0)?`<span style="color:var(--gn);font-size:10px">（已出${i.shippedQty}）</span>`:''}`).join('、')}</td><td style="font-weight:600">${fmt(o.total)}<div style="font-size:10px;color:var(--t3)">出貨 ${sQ}/${tQ} 件 <span style="color:${sQ>=tQ?'var(--gn)':'var(--or)'}">${prog}%</span></div></td><td style="color:${(o.totalProfit||0)>=0?'var(--gn)':'var(--rd)'};font-weight:600">${fmt(o.totalProfit||0)}</td><td><span class="badge ${bm[o.status]||'bgnew'}">${o.status}</span></td><td style="display:flex;gap:4px;flex-wrap:wrap">${o.status!=='已取消'&&o.status!=='已完成'?`<button class="btn bs bor" onclick="openPartialModal('${o.id}')">🚚出貨</button>`:''}<select style="font-size:11px;padding:2px 6px;background:#fff;color:var(--t1);border:1px solid var(--bd)" onchange="updOS('${o.id}',this.value)"><option ${o.status==='新訂單'?'selected':''}>新訂單</option><option ${o.status==='已出貨'?'selected':''}>已出貨</option><option ${o.status==='已完成'?'selected':''}>已完成</option><option ${o.status==='已取消'?'selected':''}>已取消</option></select><button class="btn bs" style="color:var(--ac);border-color:var(--bd)" onclick="openOEditModal('${o.id}')">編輯</button><button class="btn bd2 bs" onclick="archiveOrder('${o.id}')">封存</button><button class="btn bs" style="color:var(--rd);border-color:rgba(192,48,58,.3)" onclick="deleteOrder('${o.id}')">刪除</button></td></tr>`;
+    return`<tr><td style="font-size:10px;color:var(--t3)">${o.seq}</td><td>${o.date}</td><td>${o.customer}</td><td style="font-size:11px;color:var(--t2)">${o.items.map(i=>`${i.name}${i.skuLabel?' · '+i.skuLabel:''}×${i.qty}${(i.shippedQty&&i.shippedQty>0)?`<span style="color:var(--gn);font-size:10px">（已出${i.shippedQty}）</span>`:''}`).join('、')}</td><td style="font-weight:600">${fmt(o.total)}${o.actual!=null&&o.actual!==o.total?`<div style="font-size:10px;color:var(--gn);font-weight:600">實收 ${fmt(o.actual)}</div>`:''} ${o.freight?`<div style="font-size:10px;color:var(--bl)">運費 +${fmt(o.freight)}</div>`:''}<div style="font-size:10px;color:var(--t3)">出貨 ${sQ}/${tQ} 件 <span style="color:${sQ>=tQ?'var(--gn)':'var(--or)'}">${prog}%</span></div></td><td style="color:${(o.totalProfit||0)>=0?'var(--gn)':'var(--rd)'};font-weight:600">${fmt(o.totalProfit||0)}</td><td><span class="badge ${bm[o.status]||'bgnew'}">${o.status}</span></td><td style="display:flex;gap:4px;flex-wrap:wrap">${o.status!=='已取消'&&o.status!=='已完成'?`<button class="btn bs bor" onclick="openPartialModal('${o.id}')">🚚出貨</button>`:''}<select style="font-size:11px;padding:2px 6px;background:#fff;color:var(--t1);border:1px solid var(--bd)" onchange="updOS('${o.id}',this.value)"><option ${o.status==='新訂單'?'selected':''}>新訂單</option><option ${o.status==='已出貨'?'selected':''}>已出貨</option><option ${o.status==='已完成'?'selected':''}>已完成</option><option ${o.status==='已取消'?'selected':''}>已取消</option></select><button class="btn bs" style="color:var(--ac);border-color:var(--bd)" onclick="openOEditModal('${o.id}')">編輯</button><button class="btn bd2 bs" onclick="archiveOrder('${o.id}')">封存</button><button class="btn bs" style="color:var(--rd);border-color:rgba(192,48,58,.3)" onclick="deleteOrder('${o.id}')">刪除</button></td></tr>`;
   }).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:20px">此期間無訂單</td></tr>';
   const rev=rows.reduce((s,o)=>s+o.total,0),profit=rows.reduce((s,o)=>s+(o.totalProfit||0),0);
   document.getElementById('o-sum').innerHTML=`<span>共 ${rows.length} 筆 │ 收入：<strong>${fmt(rev)}</strong> │ 利潤：<strong style="color:${profit>=0?'var(--gn)':'var(--rd)'}">${fmt(profit)}</strong></span>`;
