@@ -440,6 +440,10 @@ tr:hover td{background:rgba(124,63,224,.04);}
     </div>
   </div>
   <div class="card" style="margin-bottom:12px">
+    <div class="ch"><span class="ct">💰 訂單實收收入</span><span style="font-size:11px;color:var(--t3)">依類別分組，以實際收款計算</span></div>
+    <div id="fin-order-rev"></div>
+  </div>
+  <div class="card" style="margin-bottom:12px">
     <div class="ch"><span class="ct">📊 各類別財務</span></div>
     <div class="tbl-wrap"><table><thead><tr><th>類別</th><th>入庫成本</th><th>出貨收入</th><th>毛利</th><th>毛利率</th><th>出貨量</th></tr></thead>
     <tbody id="fin-cat"></tbody></table></div>
@@ -1378,7 +1382,8 @@ function renderPendingShip(){
           </div>`:'<div style="font-size:10px;color:var(--rd);margin-top:4px">⚠️ 尚未填收件資料</div>'}
         </div>
         <div style="text-align:right;white-space:nowrap">
-          <div style="font-weight:700;font-size:15px;color:var(--or)">${fmt(o.total)}</div>
+          <div style="font-weight:700;font-size:15px;color:var(--or)">${fmt(o.actual!=null?o.actual:o.total)}</div>
+          ${o.actual!=null&&o.actual!==o.total?`<div style="font-size:10px;color:var(--t3);text-decoration:line-through">${fmt(o.total)}</div>`:''}
           <div style="font-size:10px;color:var(--t3)">貨到付款</div>
         </div>
       </div>
@@ -1399,7 +1404,7 @@ function renderOrders(){
     const tQ=o.items.reduce((s,i)=>s+i.qty,0),sQ=o.items.reduce((s,i)=>s+(i.shippedQty||0),0),prog=tQ>0?Math.round(sQ/tQ*100):0;
     return`<tr><td style="font-size:10px;color:var(--t3)">${o.seq}</td><td>${o.date}</td><td>${o.customer}</td><td style="font-size:11px;color:var(--t2)">${o.items.map(i=>`${i.name}${i.skuLabel?' · '+i.skuLabel:''}×${i.qty}${(i.shippedQty&&i.shippedQty>0)?`<span style="color:var(--gn);font-size:10px">（已出${i.shippedQty}）</span>`:''}`).join('、')}</td><td style="font-weight:600">${fmt(o.total)}${o.actual!=null&&o.actual!==o.total?`<div style="font-size:10px;color:var(--gn);font-weight:600">實收 ${fmt(o.actual)}</div>`:''} ${o.freight?`<div style="font-size:10px;color:var(--bl)">運費 +${fmt(o.freight)}</div>`:''}<div style="font-size:10px;color:var(--t3)">出貨 ${sQ}/${tQ} 件 <span style="color:${sQ>=tQ?'var(--gn)':'var(--or)'}">${prog}%</span></div></td><td style="color:${(o.totalProfit||0)>=0?'var(--gn)':'var(--rd)'};font-weight:600">${fmt(o.totalProfit||0)}</td><td><span class="badge ${bm[o.status]||'bgnew'}">${o.status}</span></td><td style="display:flex;gap:4px;flex-wrap:wrap">${o.status!=='已取消'&&o.status!=='已完成'?`<button class="btn bs bor" onclick="openPartialModal('${o.id}')">🚚出貨</button>`:''}<select style="font-size:11px;padding:2px 6px;background:#fff;color:var(--t1);border:1px solid var(--bd)" onchange="updOS('${o.id}',this.value)"><option ${o.status==='新訂單'?'selected':''}>新訂單</option><option ${o.status==='已出貨'?'selected':''}>已出貨</option><option ${o.status==='已完成'?'selected':''}>已完成</option><option ${o.status==='已取消'?'selected':''}>已取消</option></select><button class="btn bs" style="color:var(--ac);border-color:var(--bd)" onclick="openOEditModal('${o.id}')">編輯</button><button class="btn bd2 bs" onclick="archiveOrder('${o.id}')">封存</button><button class="btn bs" style="color:var(--rd);border-color:rgba(192,48,58,.3)" onclick="deleteOrder('${o.id}')">刪除</button></td></tr>`;
   }).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--t3);padding:20px">此期間無訂單</td></tr>';
-  const rev=rows.reduce((s,o)=>s+o.total,0),profit=rows.reduce((s,o)=>s+(o.totalProfit||0),0);
+  const rev=rows.reduce((s,o)=>s+(o.actual!=null?o.actual:o.total)+(o.freight||0),0),profit=rows.reduce((s,o)=>s+(o.actual!=null?(o.actual-(o.total-(o.totalProfit||0))):(o.totalProfit||0)),0);
   document.getElementById('o-sum').innerHTML=`<span>共 ${rows.length} 筆 │ 收入：<strong>${fmt(rev)}</strong> │ 利潤：<strong style="color:${profit>=0?'var(--gn)':'var(--rd)'}">${fmt(profit)}</strong></span>`;
   // 品項統計
   const om={};rows.forEach(o=>{o.items.forEach(i=>{const p2=db.products.find(x=>x.id==i.pid);const hasSku=p2&&p2.skus&&p2.skus.length>0;const skuLabel=hasSku?(i.skuLabel||''):'';const key=(i.pid||i.name)+'|'+skuLabel;if(!om[key])om[key]={name:p2?p2.name:i.name,sku:skuLabel,pid:i.pid||'',orders:0,shippedO:0,pendingO:0,cancelledO:0,totalQty:0,shippedQty:0,pendingQty:0,amount:0};om[key].orders++;om[key].totalQty+=i.qty;om[key].shippedQty+=i.shippedQty||0;om[key].pendingQty+=(i.qty-(i.shippedQty||0));om[key].amount+=i.qty*i.price;if(o.status==='已出貨'||o.status==='已完成')om[key].shippedO++;else if(o.status==='已取消')om[key].cancelledO++;else om[key].pendingO++;});});
@@ -1631,7 +1636,7 @@ function addCustomer(){
   save();renderCustomers();['cu-name','cu-phone','cu-bday','cu-note'].forEach(id=>document.getElementById(id).value='');
 }
 function deleteCustomer(id){if(!confirm('確定刪除？'))return;db.customers=db.customers.filter(c=>c.id!=id);save();renderCustomers();}
-function getCuStats(name){const orders=db.orders.filter(o=>o.customer===name&&!o.archived),sos=db.shipout.filter(s=>s.customer===name&&!s.cancelled&&!s.fromOrder);return{count:orders.length+sos.length,total:orders.reduce((s,o)=>s+o.total,0)+sos.reduce((s,r)=>s+r.revenue,0)};}
+function getCuStats(name){const orders=db.orders.filter(o=>o.customer===name&&!o.archived),sos=db.shipout.filter(s=>s.customer===name&&!s.cancelled&&!s.fromOrder);return{count:orders.length+sos.length,total:orders.reduce((s,o)=>s+(o.actual!=null?o.actual:o.total)+(o.freight||0),0)+sos.reduce((s,r)=>s+r.revenue,0)};}
 function renderCustomers(){
   const search=(document.getElementById('cu-search')||{}).value?.toLowerCase()||'';
   const storeF=(document.getElementById('cu-store-filter')||{}).value||'';
@@ -1661,9 +1666,62 @@ function renderFinAdjTable(){
   const items=db.finAdj||[];
   el.innerHTML=items.length?items.map(a=>{const cat=a.catId?catById(a.catId):null;return`<tr><td>${a.date}</td><td>${cat?`<span class="ct2" style="background:${cat.color}22;color:${cat.color};border-color:${cat.color}44;font-size:10px">${cat.name}</span>`:'<span style="color:var(--t3);font-size:11px">未分類</span>'}</td><td><span class="badge" style="background:${a.type==='revenue'?'var(--gnd)':'var(--rdd)'};color:${a.type==='revenue'?'var(--gn)':'var(--rd)'};border:1px solid ${a.type==='revenue'?'rgba(26,122,85,.3)':'rgba(192,48,58,.3)'}">${a.type==='revenue'?'收入調整':'成本調整'}</span></td><td style="font-weight:700;color:${a.amount>=0?'var(--gn)':'var(--rd)'}">${a.amount>=0?'+':''}${fmt(a.amount)}</td><td style="color:var(--t2)">${a.note||'—'}</td><td><button class="btn bd2 bs" onclick="delFinAdj('${a.id}')">刪除</button></td></tr>`;}).join(''):'<tr><td colspan="6" style="text-align:center;color:var(--t3);padding:12px">尚無調整</td></tr>';
 }
+function renderFinOrderRev(){
+  const el=document.getElementById('fin-order-rev');if(!el)return;
+  const pv=document.getElementById('fin-period').value;
+  const orders=db.orders.filter(o=>!o.archived&&o.status!=='已取消'&&(!pv||o.date.slice(0,finPT==='year'?4:7)===pv));
+  if(!orders.length){el.innerHTML='<div style="color:var(--t3);padding:12px">此期間無訂單</div>';return;}
+  // 依類別分組
+  const catMap={};
+  orders.forEach(o=>{
+    const actual=o.actual!=null?o.actual:o.total;
+    const freight=o.freight||0;
+    const cost=o.total-(o.totalProfit||0);
+    // 根據訂單品項拆分到各類別
+    const totalPrice=o.items.reduce((s,i)=>s+i.qty*i.price,0);
+    o.items.forEach(i=>{
+      const p2=db.products.find(x=>x.id==i.pid);
+      const cat=p2?(db.cats||[]).find(c=>c.id==p2.catId):null;
+      const catId=cat?cat.id:'__other__';
+      const catName=cat?cat.name:'未分類';
+      const catColor=cat?cat.color:'#999';
+      if(!catMap[catId])catMap[catId]={name:catName,color:catColor,rev:0,freight:0,cost:0,orders:new Set()};
+      const ratio=totalPrice>0?(i.qty*i.price)/totalPrice:0;
+      catMap[catId].rev+=actual*ratio;
+      catMap[catId].freight+=freight*ratio;
+      catMap[catId].cost+=i.qty*(i.cost||0);
+      catMap[catId].orders.add(o.id);
+    });
+  });
+  const totalRev=Object.values(catMap).reduce((s,c)=>s+c.rev,0);
+  const totalFreight=Object.values(catMap).reduce((s,c)=>s+c.freight,0);
+  const totalCost=Object.values(catMap).reduce((s,c)=>s+c.cost,0);
+  const totalProfit=totalRev+totalFreight-totalCost;
+  el.innerHTML=`
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:12px">
+      <div style="padding:10px 14px;background:var(--bg2);border-radius:10px;border:1px solid var(--bd)">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:4px">實收金額</div>
+        <div style="font-weight:700;font-size:18px;color:var(--ac)">${fmt(Math.round(totalRev))}</div>
+      </div>
+      <div style="padding:10px 14px;background:var(--bg2);border-radius:10px;border:1px solid var(--bd)">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:4px">含運費</div>
+        <div style="font-weight:700;font-size:18px;color:var(--bl)">${fmt(Math.round(totalFreight))}</div>
+      </div>
+      <div style="padding:10px 14px;background:var(--bg2);border-radius:10px;border:1px solid var(--bd)">
+        <div style="font-size:10px;color:var(--t3);margin-bottom:4px">毛利（實收-成本）</div>
+        <div style="font-weight:700;font-size:18px;color:${totalProfit>=0?'var(--gn)':'var(--rd)'}">${fmt(Math.round(totalProfit))}</div>
+      </div>
+    </div>
+    <div class="tbl-wrap"><table><thead><tr><th>類別</th><th>訂單筆數</th><th>實收金額</th><th>運費</th><th>商品成本</th><th>毛利</th><th>毛利率</th></tr></thead>
+    <tbody>${Object.values(catMap).sort((a,b)=>b.rev-a.rev).map(c=>{
+      const rev=Math.round(c.rev);const fr=Math.round(c.freight);const co=Math.round(c.cost);const pr=rev+fr-co;const mr=rev>0?((pr/(rev+fr))*100).toFixed(1):0;
+      return`<tr><td><span class="ct2" style="background:${c.color}22;color:${c.color};border-color:${c.color}44">${c.name}</span></td><td style="text-align:center;font-weight:600;color:var(--ac)">${c.orders.size}</td><td style="font-weight:600">${fmt(rev)}</td><td style="color:var(--bl)">${fr>0?fmt(fr):'—'}</td><td style="color:var(--t2)">${fmt(co)}</td><td style="font-weight:600;color:${pr>=0?'var(--gn)':'var(--rd)'}">${fmt(pr)}</td><td style="color:${pr>=0?'var(--gn)':'var(--rd)'}">${mr}%</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+}
 function renderFinance(){
   const allArr=[...db.restock.filter(r=>r.status==='received'),...db.shipout.filter(s=>!s.cancelled&&!s.archived)];
   buildPeriodOpts('fin-period',allArr,finPT);
+  renderFinOrderRev();
   const pv=document.getElementById('fin-period').value;
   const rs=filterPeriod(db.restock.filter(r=>r.status==='received'),pv,finPT);
   const so=filterPeriod(db.shipout.filter(s=>!s.cancelled&&!s.archived),pv,finPT);
